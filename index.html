@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GPU Parallel Protein Translation Engine</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #030305;
+            color: #ff007f;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h2 {
+            margin: 5px 0;
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(255, 0, 127, 0.5);
+        }
+        canvas {
+            border: 2px solid #ff007f;
+            box-shadow: 0 0 25px rgba(255, 0, 127, 0.3);
+            width: 512px;
+            height: 512px;
+            image-rendering: pixelated;
+        }
+        .info {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #8892b0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>🧬 GPU PROTEIN TRANSLATION & FOLDING ENGINE</h2>
+    <canvas id="glCanvas" width="512" height="512"></canvas>
+    <div class="info">Translating mRNA Codons into Amino Acid Chains via GPU Parallelism</div>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) alert('WebGL 2 not supported!');
+
+        const vsSource = `#version 300 es
+            in vec2 a_position;
+            out vec2 v_uv;
+            void main() {
+                v_uv = (a_position + 1.0) * 0.5;
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
+
+        const fsSource = `#version 300 es
+            precision highp float;
+            in vec2 v_uv;
+            uniform float u_time;
+            out vec4 fragColor;
+
+            float random(vec2 st) {
+                return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+            }
+
+            void main() {
+                vec2 st = v_uv * 32.0;
+                vec2 ipos = floor(st);
+                vec2 fpos = fract(st);
+
+                // จำลองไรโบโซมเคลื่อนที่แปลรหัสตามเวลา
+                float ribosome = mod(u_time * 3.0, 32.0);
+                bool translating = abs(ipos.y - ribosome) < 1.5;
+
+                float seed = floor(random(ipos) * 5.0);
+                vec3 color = vec3(0.0);
+
+                if (translating) {
+                    // แปลงรหัส Codon เป็นกรดอะมิโน (Amino Acid Coloring)
+                    if (seed == 0.0) color = vec3(1.0, 0.2, 0.2);      // Methionine (Start)
+                    else if (seed == 1.0) color = vec3(0.2, 1.0, 0.4); // Alanine
+                    else if (seed == 2.0) color = vec3(0.2, 0.6, 1.0); // Glycine
+                    else if (seed == 3.0) color = vec3(1.0, 0.8, 0.0); // Serine
+                    else color = vec3(0.8, 0.1, 1.0);                  // Stop / Complex Chain
+
+                    // เอฟเฟกต์เรืองแสงพลังงานความร้อนขณะแปลรหัส
+                    color += vec3(0.2, 0.2, 0.4);
+                } else {
+                    // สายโปรตีนที่ถูกสังเคราะห์เสร็จแล้วเกิดการพับตัว (Protein Folding Wave)
+                    float wave = sin(st.x * 0.5 + u_time * 2.0) * 2.0;
+                    if (abs(ipos.y - (ribosome + 4.0 + wave)) < 2.0) {
+                        color = vec3(0.0, 0.8, 0.8); // สายโซ่โปรตีนที่พับตัวแล้ว
+                    } else {
+                        color = vec3(0.05, 0.05, 0.1); // พื้นหลังสเปซเปล่า
+                    }
+                }
+
+                // ขอบเซลล์โครงสร้าง
+                if (fpos.x > 0.85 || fpos.y > 0.85) color *= 0.3;
+
+                fragColor = vec4(color, 1.0);
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+
+        const posLoc = gl.getAttribLocation(program, "a_position");
+        const timeLoc = gl.getUniformLocation(program, "u_time");
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        gl.enableVertexAttribArray(posLoc);
+        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+        let startTime = performance.now();
+        function render() {
+            let t = (performance.now() - startTime) / 1000.0;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.useProgram(program);
+            gl.bindVertexArray(vao);
+            gl.uniform1f(timeLoc, t);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
